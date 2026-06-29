@@ -1,14 +1,14 @@
-##🚛 TransitFlow AI: Predictive Supply Chain Control Tower
+## 🚛 TransitFlow AI: Predictive Supply Chain Control Tower
 
 #Submission for the WnCC × Kaya AI IIT India Hackathon 2026 (Supply Chain Track)
 
 Team - IIT Madras
 
-##🏗️ The Problem
+## 🏗️ The Problem
 
 Construction projects operate on tight, interdependent schedules. When heavy materials (steel, cement, machinery) are delayed in transit, it causes a cascading failure across the site. Site crews are left idle, heavy machinery sits unused, and capital burn rates skyrocket. Currently, site managers lack visibility into micro-level transit disruptions (monsoon flooding, highway accidents) until a truck simply fails to show up.
 
-##💡 Our Solution
+## 💡 Our Solution
 
 TransitFlow AI is an enterprise-grade predictive routing and delay-forecasting engine. It acts as a digital control tower for construction supply chains.
 
@@ -20,11 +20,11 @@ Real-time hyper-local weather conditions (OpenWeatherMap API)
 
 Live highway congestion metrics (Google Maps / TomTom API)
 
-##🎯 Key Feature: The Prescriptive Action Engine
+## 🎯 Key Feature: The Prescriptive Action Engine
 
 TransitFlow AI goes beyond predictions. If the XGBoost model flags a high probability of a schedule-breaking delay (e.g., >12 hours), the system automatically prescribes labor reallocations (e.g., "Delay > 12h detected. Reassign framing crew to Sector B"), minimizing idle labor costs and protecting project margins.
 
-##🛠️ System Architecture
+## 🛠️ System Architecture
 
 #TransitFlow AI utilizes a microservices-inspired architecture, separating data ingestion, ML inference, and the user interface.
 
@@ -52,7 +52,7 @@ Data Validation: Pydantic schemas ensure robust API request/response handling.
 
 Frontend: Streamlit / React.js dashboard for real-time site manager visualization.
 
-##🗂️ Repository Structure
+## 🗂️ Repository Structure
 ```
 TransitFlow-AI/
 │
@@ -76,7 +76,7 @@ TransitFlow-AI/
     └── requirements.txt       # Frontend dependencies (streamlit, requests, pandas)
 ```
 
-##🚀 Getting Started (Local Development)
+## 🚀 Getting Started (Local Development)
 
 1. Clone the Repository
 ```
@@ -116,7 +116,7 @@ Run the dashboard:
 streamlit run main.py
 ```
 
-##📈 Business Value & ROI
+## 📈 Business Value & ROI
 
 Labor Efficiency: Reassigning a 20-person crew 24 hours ahead of a delayed shipment instantly saves ~₹30,000/day in idle labor costs.
 
