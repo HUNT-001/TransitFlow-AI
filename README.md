@@ -1,6 +1,6 @@
 ## 🚛 TransitFlow AI: Predictive Supply Chain Control Tower
 
-#Submission for the WnCC × Kaya AI IIT India Hackathon 2026 (Supply Chain Track)
+# Submission for the WnCC × Kaya AI IIT India Hackathon 2026 (Supply Chain Track)
 
 Team - IIT Madras
 
