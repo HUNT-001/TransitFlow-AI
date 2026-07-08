@@ -1,0 +1,39 @@
+name: TransitFlow AI Backend CI
+
+# This tells GitHub to run this test every time someone pushes code to the main branch
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # We include 'pytest' and 'httpx' here so GitHub can run our test file
+        pip install fastapi uvicorn pydantic xgboost pandas scikit-learn joblib pytest httpx
+
+    - name: Generate Mock Model (For CI Environment)
+      # We run the pipeline quickly so the CI server has a model to test against
+      run: |
+        mkdir -p backend/ml_model
+        python notebooks/model_pipeline.py
+
+    - name: Run Pytest
+      # This moves into the backend folder and runs the test_app.py file
+      run: |
+        cd backend
+        pytest test_app.py -v
