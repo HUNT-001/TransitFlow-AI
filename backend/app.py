@@ -1,44 +1,51 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from schemas import ShipmentRequest, PredictionResponse
-import xgboost as xgb
-import pandas as pd
-import numpy as np
 import os
 import joblib
+import numpy as np
+import pandas as pd
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+
+from schemas import ShipmentRequest, PredictionResponse
+from weather_service import fetch_real_weather_severity
+
+# Define absolute paths dynamically
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(SCRIPT_DIR, "ml_model", "transitflow_xgb.pkl")
+
+# Global variable to hold our ML model
+xgb_model = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Loads the XGBoost model into memory when the server starts."""
+    global xgb_model
+    try:
+        if os.path.exists(MODEL_PATH):
+            xgb_model = joblib.load(MODEL_PATH)
+            print(f"Model loaded successfully from {MODEL_PATH}")
+        else:
+            print(f"WARNING: Model file not found at {MODEL_PATH}. API will return mock predictions.")
+    except Exception as e:
+        print(f"Error loading model: {e}")
+    yield
+    # Any cleanup code would go here when the server shuts down
 
 app = FastAPI(
     title="TransitFlow AI Core Backend",
     description="Predictive supply chain delay engine for construction.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Enable CORS so the React/Streamlit frontend can communicate with this API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allow all origins for the hackathon
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Global variable to hold our ML model
-MODEL_PATH = "ml_model/transitflow_xgb.pkl"
-xgb_model = None
-
-@app.on_event("startup")
-def load_model():
-    """Loads the XGBoost model into memory when the server starts."""
-    global xgb_model
-    try:
-        # Check if model exists, if not, we'll bypass prediction for testing
-        if os.path.exists(MODEL_PATH):
-            xgb_model = joblib.load(MODEL_PATH)
-            print(f"Model loaded successfully from {MODEL_PATH}")
-        else:
-            print("WARNING: Model file not found. API will return mock predictions.")
-    except Exception as e:
-        print(f"Error loading model: {e}")
 
 def generate_prescriptive_action(delay_hours: float, risk_level: str) -> str:
     """The core logic module that converts ML predictions into business actions."""
@@ -66,8 +73,13 @@ async def predict_delay(request: ShipmentRequest):
     Main inference endpoint. 
     Ingests shipment details, runs the XGBoost model, and returns actionable insights.
     """
-    # 1. Gather Features (Mocking external API calls if not provided by frontend)
-    weather = request.simulated_weather_severity or np.random.randint(1, 10)
+    # 1. Gather Features 
+    if request.simulated_weather_severity is not None:
+        weather = request.simulated_weather_severity
+    else:
+        # FETCH REAL LIVE WEATHER based on the destination city!
+        weather = await fetch_real_weather_severity(request.destination)
+        
     traffic = request.simulated_traffic_index or np.random.randint(1, 10)
     distance = request.distance_km
     
@@ -76,7 +88,6 @@ async def predict_delay(request: ShipmentRequest):
     
     if xgb_model:
         # Create a DataFrame that matches the exact feature columns the model was trained on
-        # Features: ['distance_km', 'weather_severity', 'traffic_index', 'weather_traffic_interaction']
         interaction = weather * traffic
         input_data = pd.DataFrame([{
             'distance_km': distance,
@@ -87,7 +98,7 @@ async def predict_delay(request: ShipmentRequest):
         
         predicted_delay = float(xgb_model.predict(input_data)[0])
     else:
-        # Fallback math logic if model isn't trained yet (so frontend can keep working)
+        # Fallback math logic if model isn't trained yet
         predicted_delay = round((weather * traffic * 0.15) + (distance * 0.005), 1)
 
     # Prevent negative delays
