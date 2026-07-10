@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Truck,
   MapPin,
@@ -10,78 +10,118 @@ import {
   Bell,
   Menu,
   Radar as RadarIcon,
-  ListTree
+  ListTree,
+  Loader2,
+  Send
 } from 'lucide-react';
 
-// --- MOCK DATA ---
-const MOCK_SHIPMENTS = [
-  {
-    id: "SHP-9942",
-    material: "Structural Steel Beams",
-    origin: "Chennai Hub",
-    dest: "Hyderabad Site Alpha",
-    originalEta: "JUL 15 · 08:00",
-    predictedDelay: 14.5,
-    riskLevel: "CRITICAL",
-    weatherImpact: "Heavy Monsoon Rain",
-    trafficImpact: "High Congestion (NH16)",
-    action: "Reassign Sector B framing crew to foundational work to prevent idle labor.",
-    angle: 300,
-  },
-  {
-    id: "SHP-8821",
-    material: "Portland Cement (Bulk)",
-    origin: "Coimbatore",
-    dest: "Bengaluru Site Omega",
-    originalEta: "JUL 12 · 10:00",
-    predictedDelay: 2.1,
-    riskLevel: "LOW",
-    weatherImpact: "Clear",
-    trafficImpact: "Normal",
-    action: "Proceed as planned. Buffer is sufficient.",
-    angle: 60,
-  },
-  {
-    id: "SHP-7734",
-    material: "Excavator Machinery",
-    origin: "Pune",
-    dest: "Hyderabad Site Alpha",
-    originalEta: "JUL 14 · 14:00",
-    predictedDelay: 5.5,
-    riskLevel: "MEDIUM",
-    weatherImpact: "Moderate Rain",
-    trafficImpact: "Accident Delay",
-    action: "Notify site manager. Adjust immediate delivery staging area.",
-    angle: 165,
-  }
-];
+const API_URL = 'http://127.0.0.1:8000/api/v1/predict-delay';
 
 const RISK_COLOR = {
   CRITICAL: 'var(--coral)',
   MEDIUM: 'var(--amber)',
   LOW: 'var(--sage)'
 };
-
-// distance from radar center encodes severity: critical = close in, low = far out
 const RISK_RADIUS = { CRITICAL: 34, MEDIUM: 66, LOW: 96 };
 
-export default function App() {
-  const [selectedShipment, setSelectedShipment] = useState(MOCK_SHIPMENTS[0]);
-  const [clock, setClock] = useState('');
+// golden-angle spacing so new blips don't stack on top of old ones
+function angleForIndex(i) {
+  return (i * 137.5) % 360;
+}
 
-  useEffect(() => {
-    const tick = () => {
-      const now = new Date();
-      const ist = new Intl.DateTimeFormat('en-IN', {
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-        timeZone: 'Asia/Kolkata'
-      }).format(now);
-      setClock(ist);
+const EMPTY_FORM = {
+  shipment_id: '',
+  material_type: '',
+  origin: '',
+  destination: '',
+  distance_km: '',
+  useSimulated: false,
+  simulated_weather_severity: 5,
+  simulated_traffic_index: 5,
+};
+
+export default function App() {
+  const [shipments, setShipments] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const selectedShipment = shipments.find(s => s.id === selectedId) || null;
+
+  const updateField = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError('');
+
+    if (!form.shipment_id || !form.material_type || !form.origin || !form.destination || !form.distance_km) {
+      setError('Please fill in all required fields.');
+      return;
+    }
+
+    const payload = {
+      shipment_id: form.shipment_id,
+      material_type: form.material_type,
+      origin: form.origin,
+      destination: form.destination,
+      distance_km: parseFloat(form.distance_km),
     };
-    tick();
-    const t = setInterval(tick, 1000);
-    return () => clearInterval(t);
-  }, []);
+    if (form.useSimulated) {
+      payload.simulated_weather_severity = Number(form.simulated_weather_severity);
+      payload.simulated_traffic_index = Number(form.simulated_traffic_index);
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Server responded ${res.status}: ${text}`);
+      }
+
+      const data = await res.json();
+
+      const merged = {
+        id: data.shipment_id,
+        material: form.material_type,
+        origin: form.origin,
+        dest: form.destination,
+        distanceKm: payload.distance_km,
+        predictedDelay: data.predicted_delay_hours,
+        riskLevel: data.risk_level,
+        weatherImpact: data.weather_impact,
+        trafficImpact: data.traffic_impact,
+        action: data.prescriptive_action,
+      };
+
+      setShipments(prev => {
+        // replace if same shipment_id resubmitted, else append
+        const withoutDupe = prev.filter(s => s.id !== merged.id);
+        return [...withoutDupe, merged];
+      });
+      setSelectedId(merged.id);
+      setForm(EMPTY_FORM);
+    } catch (err) {
+      setError(
+        err.message.includes('Failed to fetch')
+          ? "Couldn't reach the backend. Is FastAPI running on port 8000, and is CORS enabled for this origin?"
+          : err.message
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const criticalCount = shipments.filter(s => s.riskLevel === 'CRITICAL').length;
+  const avgDelay = shipments.length
+    ? (shipments.reduce((sum, s) => sum + s.predictedDelay, 0) / shipments.length).toFixed(1)
+    : '—';
 
   return (
     <div className="tf-root flex h-screen">
@@ -150,37 +190,21 @@ export default function App() {
           font-weight: 500;
         }
 
-        /* --- RADAR --- */
         .tf-radar-wrap {
           background: radial-gradient(circle at center, #0F1B33 0%, #0A1220 75%);
         }
-        .tf-radar-ring {
-          fill: none;
-          stroke: var(--line);
-          stroke-width: 1;
-        }
-        .tf-radar-crosshair {
-          stroke: var(--line);
-          stroke-width: 1;
-        }
+        .tf-radar-ring { fill: none; stroke: var(--line); stroke-width: 1; }
+        .tf-radar-crosshair { stroke: var(--line); stroke-width: 1; }
         .tf-radar-sweep {
           transform-origin: 110px 110px;
           animation: sweep 4.5s linear infinite;
         }
-        @keyframes sweep {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
+        @keyframes sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .tf-blip { cursor: pointer; }
         .tf-blip circle.core { transition: r .15s ease; }
         .tf-blip:hover circle.core { r: 7; }
-        .tf-blip circle.pulse {
-          animation: blip-pulse 2.2s ease-out infinite;
-        }
-        @keyframes blip-pulse {
-          0% { r: 5; opacity: 0.6; }
-          100% { r: 16; opacity: 0; }
-        }
+        .tf-blip circle.pulse { animation: blip-pulse 2.2s ease-out infinite; }
+        @keyframes blip-pulse { 0% { r: 5; opacity: 0.6; } 100% { r: 16; opacity: 0; } }
 
         .tf-row {
           border-left: 2px solid transparent;
@@ -188,10 +212,7 @@ export default function App() {
           cursor: pointer;
         }
         .tf-row:hover { background: rgba(255,255,255,0.02); }
-        .tf-row.selected {
-          background: rgba(242,169,59,0.07);
-          border-left-color: var(--amber);
-        }
+        .tf-row.selected { background: rgba(242,169,59,0.07); border-left-color: var(--amber); }
 
         .tf-badge {
           font-size: 10px;
@@ -207,13 +228,27 @@ export default function App() {
           border-bottom: 1px solid var(--line);
         }
 
-        .tf-execute-btn {
-          background: var(--coral);
-          color: #1a0a0a;
+        .tf-execute-btn { background: var(--coral); color: #1a0a0a; font-weight: 600; transition: filter .15s ease; }
+        .tf-execute-btn:hover { filter: brightness(1.1); }
+
+        .tf-input {
+          background: var(--panel-raised);
+          border: 1px solid var(--line);
+          color: var(--text);
+          font-size: 13px;
+          padding: 8px 10px;
+          border-radius: 4px;
+          width: 100%;
+        }
+        .tf-input:focus { outline: none; border-color: var(--amber); }
+        .tf-submit-btn {
+          background: var(--amber);
+          color: #1a1204;
           font-weight: 600;
           transition: filter .15s ease;
         }
-        .tf-execute-btn:hover { filter: brightness(1.1); }
+        .tf-submit-btn:hover { filter: brightness(1.08); }
+        .tf-submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
         @media (prefers-reduced-motion: reduce) {
           .tf-radar-sweep, .tf-blip circle.pulse { animation: none !important; }
@@ -233,7 +268,7 @@ export default function App() {
           <RailItem icon={<Activity size={18} />} label="Control Tower" active />
           <RailItem icon={<Truck size={18} />} label="Active Shipments" />
           <RailItem icon={<ListTree size={18} />} label="Route Analytics" />
-          <RailItem icon={<AlertTriangle size={18} />} label="Delay Alerts" badge="1" />
+          <RailItem icon={<AlertTriangle size={18} />} label="Delay Alerts" badge={criticalCount > 0 ? String(criticalCount) : null} />
         </nav>
 
         <div className="hidden md:block p-4 border-t tf-mono text-[10px]" style={{ borderColor: 'var(--line)', color: 'var(--muted)' }}>
@@ -243,8 +278,6 @@ export default function App() {
 
       {/* MAIN */}
       <div className="flex-1 flex flex-col overflow-hidden">
-
-        {/* TOP BAR */}
         <header className="h-16 flex items-center justify-between px-6 border-b shrink-0" style={{ borderColor: 'var(--line)' }}>
           <div className="flex items-center gap-4">
             <Menu className="md:hidden" size={20} style={{ color: 'var(--muted)' }} />
@@ -254,13 +287,13 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-5">
-            <div className="tf-mono text-sm hidden sm:flex items-center gap-2" style={{ color: 'var(--muted)' }}>
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--sage)', boxShadow: '0 0 6px var(--sage)' }} />
-              IST {clock}
-            </div>
             <div className="relative cursor-pointer">
               <Bell size={19} style={{ color: 'var(--muted)' }} />
-              <span className="tf-mono absolute -top-1.5 -right-1.5 text-white text-[9px] w-4 h-4 flex items-center justify-center rounded-full" style={{ background: 'var(--coral)' }}>1</span>
+              {criticalCount > 0 && (
+                <span className="tf-mono absolute -top-1.5 -right-1.5 text-white text-[9px] w-4 h-4 flex items-center justify-center rounded-full" style={{ background: 'var(--coral)' }}>
+                  {criticalCount}
+                </span>
+              )}
             </div>
             <div className="w-8 h-8 rounded-full flex items-center justify-center font-semibold text-xs tf-mono" style={{ background: 'var(--panel-raised)', border: '1px solid var(--line)' }}>
               TM
@@ -268,15 +301,13 @@ export default function App() {
           </div>
         </header>
 
-        {/* SCROLL AREA */}
         <main className="flex-1 overflow-y-auto p-6">
 
-          {/* KPI ROW */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
-            <Kpi label="Active Shipments" value="24" unit="in transit" accent="var(--amber)" icon={<Truck size={16} />} />
-            <Kpi label="Critical Delays" value="01" unit="+1 vs yesterday" accent="var(--coral)" icon={<AlertTriangle size={16} />} />
-            <Kpi label="Forecast Confidence" value="94.2%" unit="XGBoost model" accent="var(--sage)" icon={<TrendingUp size={16} />} />
-            <Kpi label="Idle Labor Saved" value="₹1.2L" unit="this month" accent="var(--sage)" icon={<CheckCircle2 size={16} />} />
+            <Kpi label="Active Shipments" value={String(shipments.length)} unit="submitted" accent="var(--amber)" icon={<Truck size={16} />} />
+            <Kpi label="Critical Delays" value={String(criticalCount).padStart(2, '0')} unit="of total" accent="var(--coral)" icon={<AlertTriangle size={16} />} />
+            <Kpi label="Avg Predicted Delay" value={avgDelay === '—' ? '—' : `${avgDelay}H`} unit="across shipments" accent="var(--sage)" icon={<TrendingUp size={16} />} />
+            <Kpi label="Idle Labor Saved" value="₹1.2L" unit="illustrative" accent="var(--sage)" icon={<CheckCircle2 size={16} />} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -316,15 +347,15 @@ export default function App() {
                       </linearGradient>
                     </defs>
 
-                    {MOCK_SHIPMENTS.map(s => {
-                      const r = RISK_RADIUS[s.riskLevel];
-                      const rad = (s.angle * Math.PI) / 180;
+                    {shipments.map((s, i) => {
+                      const r = RISK_RADIUS[s.riskLevel] ?? 96;
+                      const rad = (angleForIndex(i) * Math.PI) / 180;
                       const x = 110 + r * Math.cos(rad);
                       const y = 110 + r * Math.sin(rad);
-                      const color = RISK_COLOR[s.riskLevel];
-                      const isSel = selectedShipment.id === s.id;
+                      const color = RISK_COLOR[s.riskLevel] ?? 'var(--muted)';
+                      const isSel = selectedId === s.id;
                       return (
-                        <g key={s.id} className="tf-blip" onClick={() => setSelectedShipment(s)}>
+                        <g key={s.id} className="tf-blip" onClick={() => setSelectedId(s.id)}>
                           <circle className="pulse" cx={x} cy={y} r="5" fill={color} />
                           <circle className="core" cx={x} cy={y} r={isSel ? 7 : 5} fill={color} stroke={isSel ? '#fff' : 'none'} strokeWidth="1.5" />
                         </g>
@@ -334,11 +365,13 @@ export default function App() {
                 </div>
 
                 <div className="px-5 pb-4 flex justify-between items-center text-xs tf-mono" style={{ color: 'var(--muted)' }}>
-                  <span>TRACKING: {selectedShipment.id}</span>
-                  <span className="flex items-center gap-1.5">
-                    <CloudRain size={13} />
-                    {selectedShipment.weatherImpact}
-                  </span>
+                  <span>{shipments.length === 0 ? 'AWAITING SHIPMENT DATA' : `TRACKING: ${selectedShipment ? selectedShipment.id : '—'}`}</span>
+                  {selectedShipment && (
+                    <span className="flex items-center gap-1.5">
+                      <CloudRain size={13} />
+                      {selectedShipment.weatherImpact}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -346,109 +379,178 @@ export default function App() {
               <div className="tf-panel flex-1">
                 <div className="px-5 py-4 border-b flex justify-between items-center" style={{ borderColor: 'var(--line)' }}>
                   <h3 className="tf-display text-sm font-semibold">Shipment Board</h3>
-                  <button className="text-xs tf-mono" style={{ color: 'var(--amber)' }}>VIEW ALL →</button>
                 </div>
 
-                {/* header row */}
-                <div className="hidden sm:grid grid-cols-12 px-5 py-2 tf-eyebrow" style={{ borderBottom: '1px solid var(--line)' }}>
-                  <span className="col-span-4">Shipment</span>
-                  <span className="col-span-4">Route</span>
-                  <span className="col-span-2">ETA</span>
-                  <span className="col-span-2 text-right">Status</span>
-                </div>
-
-                <div>
-                  {MOCK_SHIPMENTS.map(shipment => {
-                    const sel = selectedShipment.id === shipment.id;
-                    const color = RISK_COLOR[shipment.riskLevel];
-                    return (
-                      <div
-                        key={shipment.id}
-                        onClick={() => setSelectedShipment(shipment)}
-                        className={`tf-row grid grid-cols-12 items-center px-5 py-3 ${sel ? 'selected' : ''}`}
-                        style={{ borderBottom: '1px solid var(--line)' }}
-                      >
-                        <div className="col-span-12 sm:col-span-4">
-                          <p className="tf-mono text-sm font-medium">{shipment.id}</p>
-                          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{shipment.material}</p>
-                        </div>
-                        <div className="col-span-6 sm:col-span-4 text-xs mt-2 sm:mt-0" style={{ color: 'var(--muted)' }}>
-                          {shipment.origin} → {shipment.dest}
-                        </div>
-                        <div className="col-span-6 sm:col-span-2 tf-mono text-xs mt-2 sm:mt-0" style={{ color: 'var(--muted)' }}>
-                          {shipment.originalEta}
-                        </div>
-                        <div className="col-span-12 sm:col-span-2 flex sm:justify-end mt-2 sm:mt-0">
-                          <span className="tf-badge" style={{ background: `${color}22`, color }}>
-                            {shipment.predictedDelay > 0 ? `+${shipment.predictedDelay}H` : 'ON TIME'}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                {shipments.length === 0 ? (
+                  <div className="px-5 py-8 text-sm text-center" style={{ color: 'var(--muted)' }}>
+                    No shipments yet — submit one using the form to run a live prediction.
+                  </div>
+                ) : (
+                  <>
+                    <div className="hidden sm:grid grid-cols-12 px-5 py-2 tf-eyebrow" style={{ borderBottom: '1px solid var(--line)' }}>
+                      <span className="col-span-4">Shipment</span>
+                      <span className="col-span-4">Route</span>
+                      <span className="col-span-2">Distance</span>
+                      <span className="col-span-2 text-right">Status</span>
+                    </div>
+                    <div>
+                      {shipments.map(shipment => {
+                        const sel = selectedId === shipment.id;
+                        const color = RISK_COLOR[shipment.riskLevel] ?? 'var(--muted)';
+                        return (
+                          <div
+                            key={shipment.id}
+                            onClick={() => setSelectedId(shipment.id)}
+                            className={`tf-row grid grid-cols-12 items-center px-5 py-3 ${sel ? 'selected' : ''}`}
+                            style={{ borderBottom: '1px solid var(--line)' }}
+                          >
+                            <div className="col-span-12 sm:col-span-4">
+                              <p className="tf-mono text-sm font-medium">{shipment.id}</p>
+                              <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{shipment.material}</p>
+                            </div>
+                            <div className="col-span-6 sm:col-span-4 text-xs mt-2 sm:mt-0" style={{ color: 'var(--muted)' }}>
+                              {shipment.origin} → {shipment.dest}
+                            </div>
+                            <div className="col-span-6 sm:col-span-2 tf-mono text-xs mt-2 sm:mt-0" style={{ color: 'var(--muted)' }}>
+                              {shipment.distanceKm} km
+                            </div>
+                            <div className="col-span-12 sm:col-span-2 flex sm:justify-end mt-2 sm:mt-0">
+                              <span className="tf-badge" style={{ background: `${color}22`, color }}>
+                                {shipment.predictedDelay > 0 ? `+${shipment.predictedDelay}H` : 'ON TIME'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
-            {/* RIGHT — PRESCRIPTIVE ACTION CONSOLE */}
-            <div className="lg:col-span-1">
-              <div className="tf-panel overflow-hidden sticky top-0">
+            {/* RIGHT */}
+            <div className="lg:col-span-1 flex flex-col gap-5">
+
+              {/* SUBMISSION FORM */}
+              <div className="tf-panel overflow-hidden">
+                <div className="tf-console-header px-5 py-4 flex items-center gap-2.5">
+                  <Send size={16} style={{ color: 'var(--amber)' }} />
+                  <h3 className="tf-display text-sm font-semibold">New Shipment</h3>
+                </div>
+                <form onSubmit={handleSubmit} className="p-5 flex flex-col gap-3">
+                  <Field label="Shipment ID">
+                    <input className="tf-input" value={form.shipment_id} onChange={e => updateField('shipment_id', e.target.value)} placeholder="SHP-1001" />
+                  </Field>
+                  <Field label="Material Type">
+                    <input className="tf-input" value={form.material_type} onChange={e => updateField('material_type', e.target.value)} placeholder="Structural Steel" />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Origin">
+                      <input className="tf-input" value={form.origin} onChange={e => updateField('origin', e.target.value)} placeholder="Chennai Hub" />
+                    </Field>
+                    <Field label="Destination">
+                      <input className="tf-input" value={form.destination} onChange={e => updateField('destination', e.target.value)} placeholder="Hyderabad Site" />
+                    </Field>
+                  </div>
+                  <Field label="Distance (km)">
+                    <input className="tf-input" type="number" step="0.1" value={form.distance_km} onChange={e => updateField('distance_km', e.target.value)} placeholder="630.5" />
+                  </Field>
+
+                  <label className="flex items-center gap-2 text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                    <input type="checkbox" checked={form.useSimulated} onChange={e => updateField('useSimulated', e.target.checked)} />
+                    Override with simulated conditions (skip live weather lookup)
+                  </label>
+
+                  {form.useSimulated && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label={`Weather Severity: ${form.simulated_weather_severity}`}>
+                        <input type="range" min="1" max="10" value={form.simulated_weather_severity}
+                          onChange={e => updateField('simulated_weather_severity', e.target.value)} className="w-full" />
+                      </Field>
+                      <Field label={`Traffic Index: ${form.simulated_traffic_index}`}>
+                        <input type="range" min="1" max="10" value={form.simulated_traffic_index}
+                          onChange={e => updateField('simulated_traffic_index', e.target.value)} className="w-full" />
+                      </Field>
+                    </div>
+                  )}
+
+                  {error && (
+                    <p className="text-xs p-2 rounded" style={{ background: 'rgba(229,72,77,0.12)', color: 'var(--coral)' }}>
+                      {error}
+                    </p>
+                  )}
+
+                  <button type="submit" disabled={loading} className="tf-submit-btn mt-1 py-2.5 rounded text-sm flex items-center justify-center gap-2">
+                    {loading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+                    {loading ? 'Running Prediction…' : 'Run Prediction'}
+                  </button>
+                </form>
+              </div>
+
+              {/* PRESCRIPTIVE CONSOLE */}
+              <div className="tf-panel overflow-hidden">
                 <div className="tf-console-header px-5 py-4 flex items-center gap-2.5">
                   <Activity size={17} style={{ color: 'var(--amber)' }} />
                   <h3 className="tf-display text-sm font-semibold">Prescriptive Action Engine</h3>
                 </div>
 
-                <div className="p-5 flex flex-col gap-4">
-                  <div>
-                    <p className="tf-eyebrow mb-1">Target Shipment</p>
-                    <p className="tf-mono text-base font-semibold">{selectedShipment.id}</p>
-                    <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>{selectedShipment.material}</p>
+                {!selectedShipment ? (
+                  <div className="p-5 text-sm" style={{ color: 'var(--muted)' }}>
+                    Submit or select a shipment to view its forecast and recommendation.
                   </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="p-3 rounded" style={{ background: 'var(--panel-raised)', border: '1px solid var(--line)' }}>
-                      <p className="tf-eyebrow mb-1">Original ETA</p>
-                      <p className="tf-mono text-sm">{selectedShipment.originalEta}</p>
+                ) : (
+                  <div className="p-5 flex flex-col gap-4">
+                    <div>
+                      <p className="tf-eyebrow mb-1">Target Shipment</p>
+                      <p className="tf-mono text-base font-semibold">{selectedShipment.id}</p>
+                      <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>{selectedShipment.material}</p>
                     </div>
-                    <div className="p-3 rounded" style={{ background: 'var(--panel-raised)', border: `1px solid ${RISK_COLOR[selectedShipment.riskLevel]}55` }}>
-                      <p className="tf-eyebrow mb-1">Forecast</p>
-                      <p className="tf-mono text-lg font-semibold" style={{ color: RISK_COLOR[selectedShipment.riskLevel] }}>
-                        +{selectedShipment.predictedDelay}H
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 rounded" style={{ background: 'var(--panel-raised)', border: '1px solid var(--line)' }}>
+                        <p className="tf-eyebrow mb-1">Distance</p>
+                        <p className="tf-mono text-sm">{selectedShipment.distanceKm} km</p>
+                      </div>
+                      <div className="p-3 rounded" style={{ background: 'var(--panel-raised)', border: `1px solid ${RISK_COLOR[selectedShipment.riskLevel]}55` }}>
+                        <p className="tf-eyebrow mb-1">Forecast</p>
+                        <p className="tf-mono text-lg font-semibold" style={{ color: RISK_COLOR[selectedShipment.riskLevel] }}>
+                          +{selectedShipment.predictedDelay}H
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <p className="tf-eyebrow">Delay Factors Detected</p>
+                      <div className="flex items-center gap-2.5 p-2 rounded text-sm" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                        <CloudRain size={15} style={{ color: 'var(--amber)' }} />
+                        {selectedShipment.weatherImpact}
+                      </div>
+                      <div className="flex items-center gap-2.5 p-2 rounded text-sm" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                        <MapPin size={15} style={{ color: 'var(--amber)' }} />
+                        {selectedShipment.trafficImpact}
+                      </div>
+                    </div>
+
+                    <div
+                      className="mt-1 p-4 rounded"
+                      style={{
+                        background: `${RISK_COLOR[selectedShipment.riskLevel]}14`,
+                        border: `1px solid ${RISK_COLOR[selectedShipment.riskLevel]}44`
+                      }}
+                    >
+                      <p className="tf-eyebrow mb-2 flex items-center gap-1.5" style={{ color: RISK_COLOR[selectedShipment.riskLevel] }}>
+                        <Bell size={12} /> Recommendation
                       </p>
+                      <p className="text-sm leading-relaxed">{selectedShipment.action}</p>
+
+                      {selectedShipment.riskLevel === 'CRITICAL' && (
+                        <button className="tf-execute-btn mt-4 w-full py-2.5 rounded text-sm">
+                          Execute Labor Reallocation
+                        </button>
+                      )}
                     </div>
                   </div>
-
-                  <div className="flex flex-col gap-2">
-                    <p className="tf-eyebrow">Delay Factors Detected</p>
-                    <div className="flex items-center gap-2.5 p-2 rounded text-sm" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                      <CloudRain size={15} style={{ color: 'var(--amber)' }} />
-                      {selectedShipment.weatherImpact}
-                    </div>
-                    <div className="flex items-center gap-2.5 p-2 rounded text-sm" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                      <MapPin size={15} style={{ color: 'var(--amber)' }} />
-                      {selectedShipment.trafficImpact}
-                    </div>
-                  </div>
-
-                  <div
-                    className="mt-1 p-4 rounded"
-                    style={{
-                      background: `${RISK_COLOR[selectedShipment.riskLevel]}14`,
-                      border: `1px solid ${RISK_COLOR[selectedShipment.riskLevel]}44`
-                    }}
-                  >
-                    <p className="tf-eyebrow mb-2 flex items-center gap-1.5" style={{ color: RISK_COLOR[selectedShipment.riskLevel] }}>
-                      <Bell size={12} /> Recommendation
-                    </p>
-                    <p className="text-sm leading-relaxed">{selectedShipment.action}</p>
-
-                    {selectedShipment.riskLevel === 'CRITICAL' && (
-                      <button className="tf-execute-btn mt-4 w-full py-2.5 rounded text-sm">
-                        Execute Labor Reallocation
-                      </button>
-                    )}
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
@@ -493,5 +595,14 @@ function LegendDot({ color, label }) {
       <span className="w-2 h-2 rounded-full inline-block" style={{ background: color }} />
       {label}
     </span>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="tf-eyebrow">{label}</span>
+      {children}
+    </label>
   );
 }
