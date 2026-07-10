@@ -30,7 +30,7 @@ jobs:
       # We run the pipeline quickly so the CI server has a model to test against
       run: |
         mkdir -p backend/ml_model
-        python notebooks/model_pipeline.py
+        python notebook/model_pipeline.py
 
     - name: Run Pytest
       # This moves into the backend folder and runs the test_app.py file
